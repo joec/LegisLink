@@ -1,0 +1,1544 @@
+#!/usr/bin/perl
+
+ BEGIN {
+ my $homedir = ( getpwuid($>) )[7];
+ my @user_include;
+    foreach my $path (@INC) {
+      if ( -d $homedir . '/perl' . $path ) {
+        push @user_include, $homedir . '/perl' . $path;
+        }
+    }
+    unshift @INC, @user_include;
+ }
+
+
+# 
+# This code may be freely reproduced, distributed, transmitted, used, modified, 
+# built upon, or otherwise exploited by anyone for any purpose, commercial or non-commercial, 
+# and in any way, including by methods that have not yet been invented or conceived.
+#
+# Purpose: Provide link/citation directly to various US Federal legislative docs and sublevels
+# Example URL: http://LegisLink.org/us/PL-110-234-5
+
+# DOCUMENTATION
+#
+# LEGISLATION IN TEXT FILES
+# The approach for legislation stored in text files such as Public Laws is to:
+# (1) get the file from the government's site,
+# (2) add HTML anchor tags (<a name>) to the target location in the file, 
+# (3) save the results on the legislin server as an HTML file so the anchor will process on the browser, and then
+# (4) redirect the user to the anchor of the saved file.
+
+# CODE CONTRIBUTORS
+# Joe Carmel 
+
+# CHANGE HISTORY
+# 2009-09-21: Public Law sections and titles 
+# 2009-09-22: US Code sections 
+# 2009-09-24: Added extended section numbering for US Code sections. Not handling sections when in a list or range.
+# 2009-09-27: Split out shared.pl as a module of shared functions.  Added Congresional bills.
+# 2009-10-04: Added form capability as an editable interface.
+# 2009-10-07: Added logging.
+# 2010-02-13: Added using slash in addition to ? for syntax.
+# 2010-02-13: Added PDF option.
+# 2010-02-15: Added redirect to Public Law when section number isn't provided (per Rob Richards request)
+# 2013-03-21: Changed website address based on GPO URL changes.
+
+
+use CAM::PDF;
+require LWP::UserAgent;
+$ua = LWP::UserAgent->new;
+
+
+
+use HTTP::Lite;
+$http = new HTTP::Lite;
+
+%BillType=("hr","H.R.",
+"hres","H.RES.",
+"hjres","H.J.RES.",
+"hconres","H.CON.RES.",
+"s","S.",
+"sres","S.RES.",
+"sjres","S.J.RES.",
+"sconres","S.CON.RES.");
+
+($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = gmtime(time);
+$year=$year+1900; 
+$curcongress=int(($year-1787)/2);
+# $curcongress="111";
+
+
+# Get URL string after the ? from the URL.
+$posted_information=$ENV{QUERY_STRING}; 
+print "Content-type: text/html\n\n"; 
+# print "year=".$year."<br>";
+
+do "cgi-bin/shared.pl";
+
+# do "cgi-bin/getstat.pl";
+
+# Remove initial "x=" when script is called from a form
+$posted_information=~s|^x=||;
+
+# Handle URLs without ? syntax.  So, LeglsLink.org/us/HR-11-IH will also work.
+if ($posted_information eq "")
+	{
+	$posted_information=$ENV{PATH_INFO};
+	$posted_information=~s|^/||;	
+	}
+
+$logfile="log/us";
+
+$StatDirectory='/home2/congres4/public_html/legislink/Stat';
+
+########################################
+# Sections of Current Congress bills 
+########################################
+if ($posted_information=~m!^(stat|sal)[-/](\d+)[-/]([A-C]?\d+)[-/]?(pdf)?!i)	{
+	my $salvol=$2;
+	my $salpage=$3;
+	my $saltype=$4;
+	if ($saltype!~m|pdf|i)
+		{
+		$saltype="HTM";
+		}
+		
+	my $website=GetStatLink($salvol,$salpage,$saltype);
+	
+		print "Content-type: text/html\n\n";
+	print "<html><body>WEB=".$website;
+# exit;		
+	
+	if (length($website)>1)
+		{
+		RedirectToWebsite($website);
+		}
+
+	}
+
+
+
+
+########################################
+# Sections of Current Congress bills 
+########################################
+if ($posted_information=~m!^(hr|hres|hjres|hconres|s|sres|sjres|sconres)[-/](\d+)[-/](\D+)[-/](\d+)[-/]?(pdf)?!i)	{
+	$billtype=lc($1);
+	$billnum=$2;
+	$billstage=lc($3);
+	$section=$4;
+	$pdfflag=$5;	
+
+
+	
+
+
+	
+
+	$congress=$curcongress;
+	
+	# $billtype=~s|^hr$|h|;
+	# $billtype=~s|^(..).*|\1|;
+
+	if ($pdfflag=~m|pdf|i)
+		{
+		# http://www.gpo.gov/fdsys/pkg/BILLS-113hr3rh/pdf/BILLS-113hr3rh.pdf		
+		# $website=sprintf("http://frwebgate.access.gpo.gov/cgi-bin/getdoc.cgi?dbname=%s_cong_bills&docid=f:%s%d%s.txt.pdf",$congress,$billtype,$billnum,$billstage);
+		
+		
+		$website=sprintf("http://www.gpo.gov/fdsys/pkg/BILLS-%d%s%d%s/pdf/BILLS-%d%s%d%s.pdf",			$congress,$billtype,$billnum,$billstage,$congress,$billtype,$billnum,$billstage);
+		
+		
+	#	print "Content-type: text/html\n\n";
+	#	print "<html><body>Here";
+	#	print $website."\n";
+	#	exit;
+		UsePDF($website, $section);
+		}
+
+
+
+	
+#	$website=sprintf("http://frwebgate.access.gpo.gov/cgi-bin/getdoc.cgi?dbname=%s_cong_bills&docid=f:%s%d%s.txt",$congress,$billtype,$billnum,$billstage);
+	
+# http://www.gpo.gov/fdsys/pkg/BILLS-113hr11ih/html/BILLS-113hr11ih.htm
+
+$website=sprintf("http://www.gpo.gov/fdsys/pkg/BILLS-%d%s%d%s/html/BILLS-%d%s%d%s.htm",$congress,$billtype,$billnum,$billstage,$congress,$billtype,$billnum,$billstage);
+
+
+
+# print "<html><body>congress=".$year."<br>".$congress."<br/>".$website;
+#  exit;	
+	$legdoc=GetFileFromURL($website);
+
+	
+	# Add the HTML anchor to the text file.
+	# OLDER CODE $legdoc=~s|\n\s*SEC\. ($section)\.([^\n]*?)\n|\n<a name="SEC-\1">\nSEC. \1.</a>\2\n|i;
+	# $sechead=$2;
+	
+	$search="\\n\\s*SEC\\.\\s+".$section."\\.\\s";
+	$anchor="SEC-".$section;
+	$legdoc=~m|\n\s*SEC\. ($section)\.([^\n]*?)\n|i;
+	$sechead=$2;
+
+	$legdoc=AnchorLastRegex($legdoc,$search,$anchor);
+	
+	$descript=GetDescriptionFromDoc($legdoc);
+	$descript=$descript." : Section ".$section.". ".$sechead;
+	$posted_information=uc($posted_information);
+	# LogHit($logfile,$posted_information,$descript);
+
+	# print "Content-type: text/html\n\n";
+	# print "<html><body>Posted=".$posted_information."<br/>section=".$section.$legdoc."</body></html>";
+	
+	# exit;
+
+
+	
+	# Store the file and Display the Stored File with the Anchor.	
+	$outfn="Bills/".$congress."-".$billtype.$billnum.$billstage.".html";
+	$anchor="SEC-".$section;	
+	StoreFileandDisplayToAnchor($legdoc,$outfn,$anchor);
+		
+	}
+	
+########################################
+# Sections of bills (any Congress)
+########################################
+elsif ($posted_information=~m!^(\d+)-(hr|hres|hjres|hconres|s|sres|sjres|sconres)-(\d+)-([^\d-]+)-?(\d+)?-?(pdf)?!i)
+	{
+	$congress=$1;
+	
+	$billtype=lc($2);
+	$billnum=$3;
+	$billstage=lc($4);
+	$section=$5;
+	$pdfflag=$6;	
+
+	# $billtypeo=$billtype;	
+	#$billtype=~s|^hr$|h|;
+	#$billtype=~s|^(..).*|\1|;
+	
+	if ($pdfflag=~m|pdf|i)
+		{
+		# $website=sprintf("http://frwebgate.access.gpo.gov/cgi-bin/getdoc.cgi?dbname=%s_cong_bills&docid=f:%s%d%s.txt.pdf",$congress,$billtype,$billnum,$billstage);
+		$website=sprintf("http://www.gpo.gov/fdsys/pkg/BILLS-%s%s%d%s/pdf/BILLS-%s%s%d%s.pdf",			$congress,$billtype,$billnum,$billstage,$congress,$billtype,$billnum,$billstage);
+		
+
+		UsePDF($website, $section);
+		}
+
+
+$website=sprintf("http://www.gpo.gov/fdsys/pkg/BILLS-%d%s%d%s/html/BILLS-%d%s%d%s.htm",$congress,$billtype,$billnum,$billstage,$congress,$billtype,$billnum,$billstage);
+
+	
+#	$website=sprintf("http://frwebgate.access.gpo.gov/cgi-bin/getdoc.cgi?dbname=%s_cong_bills&docid=f:%s%d%s.txt",$congress,$billtype,$billnum,$billstage);
+	
+	if ($section eq "")
+	
+		{
+		
+		#$website=~s|-pdf\.txt$|.txt.pdf|;  # handle request for pdf
+
+$website=sprintf("http://www.gpo.gov/fdsys/pkg/BILLS-%d%s%d%s/html/BILLS-%d%s%d%s.htm",$congress,$billtype,$billnum,$billstage,$congress,$billtype,$billnum,$billstage);
+
+
+		RedirectToWebsite($website);		
+
+	}
+	
+
+# print "billstage=".$billstage."<br>";
+# print "WEBSUTE=".$website;
+
+# exit;
+
+	$legdoc=GetFileFromURL($website);
+
+	
+	# Add the HTML anchor to the text file.
+
+	# $search="\n\s*SEC\\. ".$section."\\. ";
+	$search="\\n\\s*SEC\\.\\s+".$section."\\.\\s";
+	$anchor="SEC-".$section;
+	$legdoc=~m|\n\s*SEC\. ($section)\.([^\n]*?)\n|i;
+	$sechead=$2;
+
+	$legdoc=AnchorLastRegex($legdoc,$search,$anchor);
+	# print $legdoc;
+
+	$descript=GetDescriptionFromDoc($legdoc);
+	$descript=$descript." : Section ".$section.". ".$sechead;
+	
+	$posted_information=uc($posted_information);	
+	 LogHit($logfile,$posted_information,$descript);	
+
+	# print "Content-type: text/html\n\n";
+	#  print "<html><body>Posted=".$posted_information."<br/>section=".$section.$legdoc."</body></html>";
+	
+	# exit;
+
+	
+	
+	# Store the file and Display the Stored File with the Anchor.	
+	$outfn="Bills/".$congress."-".$billtype.$billnum.$billstage.".html";
+	$anchor="SEC-".$section;	
+	StoreFileandDisplayToAnchor($legdoc,$outfn,$anchor);
+	
+	# RedirectToWebsite($website);
+	}
+	
+########################################
+# Bill number only
+########################################
+
+# 
+elsif ($posted_information=~m!^(\d*)[-/]?(hr|hres|hjres|hconres|s|sres|sjres|sconres)[-/](\d+)(-v|-pdf)?!i)
+	{
+	$congress=$1;	
+
+	$billtype=lc($2);
+	$billnum=$3;
+	$option=$4;
+	if (!$congress) {$congress=$curcongress;}
+
+	if ($option=~m|pdf|i)
+		{
+		$website=sprintf("http://thomas.loc.gov/cgi-bin/query/z?c%d:%s%d:",$congress,$BillType{$billtype},$billnum);
+		$list=GetFileFromURL($website);
+		while ($list=~s|href="([^"]*?)"||)
+			{
+			$tempurl=$1;
+			if ($tempurl=~m|\.pdf$|)
+				{$lastpdf=$tempurl;}				
+			
+			}
+		RedirectToWebsite($lastpdf);
+		}
+		
+	elsif ($option=~m|/v|)
+		{
+		$website=sprintf("http://www.c-spanarchives.org/congress/?q=node%s2F77538&type=%s&num=%d&text=&datebegin=&dateend=&congress=%d","%",$BillType{$billtype},$billnum,$congress);
+		$legdoc=GetFileFromURL($website);
+		
+		
+		if ($legdoc=~m|<h1>Unable to connect to database server</h1>|)
+			{
+			print "<html><body>C-SPAN's database server is not available right now.  Try again later.</body></html>";
+			exit;
+			}
+		# RedirectToWebsite($website);		
+		# exit;
+		$temp=$BillType{$billtype}.$billnum;
+		
+		if ($legdoc=~m|<a href="([^"]*?)">$temp</a>|)
+			{
+			$href=$1;
+			$website="http://www.c-spanarchives.org/congress/".$href;
+			# print "<html><body>".$website." Can't find bill at CSPAN</body></html>";
+			# exit;
+			$posted_information=uc($posted_information);			
+			RedirectToWebsite($website,$logfile,$posted_information,$nodescript);
+			}
+		else
+			{
+			print "<html><body>Can't find bill at CSPAN</body></html>";
+			exit;
+			}
+		}
+	else
+		{
+		$website=sprintf("http://thomas.loc.gov/cgi-bin/query/z?c%d:%s%d:",$congress,$BillType{$billtype},$billnum);
+		$posted_information=uc($posted_information);
+		RedirectToWebsite($website,$logfile,$posted_information,$nodescript);	
+		}
+	
+	
+	}
+	
+
+	
+
+
+
+########################################
+# Current Congress' Bill number with stage identified
+########################################
+# /x option for XML file
+
+elsif ($posted_information=~m!^(hr|hres|hjres|hconres|s|sres|sjres|sconres)-(\d+)-([a-zA-Z]+)(/[xv])?!i)
+	{
+	$billtype=lc($1);
+	$billnum=$2;
+	$billstage=lc($3);
+	$option=$4;
+	$congress=$curcongress;
+	
+	$billtype=~s|^hr$|h|;
+	$billtype=~s|^(..).*|\1|;
+	
+	
+	if ($option=~m|x|i)
+		{
+		# http://thomas.loc.gov/home/gpoxmlc111/h12_ih.xml
+		$website=sprintf("http://thomas.loc.gov/gpoxmlc%d/%s%d_%s.xml",$congress,$billtype,$billnum,$billstage);
+		$posted_information=uc($posted_information);
+		RedirectToWebsite($website,$logfile,$posted_information,$nodescript);		}
+	else 
+		{		
+		$website=sprintf("http://frwebgate.access.gpo.gov/cgi-bin/getdoc.cgi?dbname=%s_cong_bills&docid=f:%s%d%s.txt",$congress,$billtype,$billnum,$billstage);	
+		$posted_information=uc($posted_information);
+		RedirectToWebsite($website,$logfile,$posted_information,$nodescript);
+		}
+	}
+
+		
+########################################	
+# Public Law Titles
+########################################
+elsif ($posted_information=~m|pl-(\d+)-(\d+)-title-([ivxld]+)|i)
+	{
+	$congress=$1;
+	$plnum=$2;
+	$title=$3;
+	
+	# Uppercase the title number
+	$title=uc($title);
+	
+	# Get the file from GPO
+	$legdoc=GetPublicLawTxtDocFromGPO($congress,$plnum);
+
+	# Since TITLE [num]-- can occur in the Table of Contents, the approach	
+	# is to add an anchor to the last occurrence of TITLE [num]-- in the file.
+
+	# Get number of occurrences (0 if only one occurrence)	
+	@mres=$legdoc=~m|\n\s*(TITLE $title)--|g;
+	
+
+
+	# Add the HTML anchor to the text file.
+	# First change -- to __ for occurrences before the last one
+	if ($#mres>0)
+		{
+		for ($j=0;$j<$#mres;$j++)
+			{	
+			$legdoc=~s|\n(\s*TITLE) ($title)--|\n\1 \2__|;
+			}
+		}
+	# Add anchor link				
+	$legdoc=~s|\n(\s*TITLE) ($title)--([^\n]*?)\n|\n<a name="$title">\n\1 \2--</a>\3\n|;
+	$titleheader=$3;
+	# Change __ back to --
+	$legdoc=~s|\n(\s*TITLE) ($title)__|\n\1 \2--|g;
+	
+	# Add the HTML anchor to the text file.
+	
+	$descript=GetDescriptionFromDoc($legdoc);
+	$descript=$descript." : Title ".$title." ".$titleheader;
+	$posted_information=uc($posted_information);	
+	LogHit($logfile,$posted_information,$descript);
+
+	
+	
+	# Store the file and Display the Stored File with the Anchor.	
+	$outfn="PublicLaws/".$congress."-".$plnum.".html";
+	$anchor=$title;
+	StoreFileandDisplayToAnchor($legdoc,$outfn,$anchor);
+	}
+
+
+########################################
+# Public Law Sections
+########################################
+elsif ($posted_information=~m|pl-(\d+)-(\d+)-?(\d+)?|i)
+	{
+	$congress=$1;
+	$plnum=$2;
+	$plsection=$3;
+
+	
+# If no section number is provided, redirect to GPO Public Law
+if (!$plsection)
+	{
+	GetPublicLawTxtDocFromGPO($congress,$plnum,1);
+	}
+# Otherwise get the file from GPO
+else
+	{
+	$legdoc=GetPublicLawTxtDocFromGPO($congress,$plnum,0);
+	}
+	
+	# Add the HTML anchor to the text file.
+	$legdoc=~s!\n\s*(SEC\. |Sec\. )($plsection)\.([^\n]*?)\n!\n<a name="SEC-\2">\n\1\2.</a>\3\n!;
+	$sectitle=$3;
+	
+	$descript=GetDescriptionFromDoc($legdoc);
+	$descript=$descript." : Section ".$plsection.$sectitle;
+	$descript=~s|\s*$||;
+	$posted_information=uc($posted_information);	
+	LogHit($logfile,$posted_information,$descript);
+	
+	
+	# Store the file and Display the Stored File with the Anchor.	
+	$outfn="PublicLaws/".$congress."-".$plnum.".html";
+	$anchor="SEC-".$plsection;
+	StoreFileandDisplayToAnchor($legdoc,$outfn,"SEC-".$plsection);
+	}
+
+
+
+########################################	
+# House Vote
+########################################
+elsif ($posted_information=~m|house-vote-(\d+)-(\d+)|i)
+	{
+	$year=$1;
+	$rollnum=$2;
+	$website=sprintf("http://clerk.house.gov/evs/%4d/roll%03d.xml",$year,$rollnum);
+	
+	# Since the House and Senate Roll Calls are pretty small, grabbing the vote-question is easy
+	$legdoc=GetFileFromURL($website);
+	
+	$legdoc=~m|<legis-num>([^<]*?)<|;
+	$legisnum=$1;
+
+	$legdoc=~m|<vote-desc>([^<]*?)<|;
+	$votedesc=$1;
+
+	# If there is no vote description, get the vote question.	
+	if ($votedesc eq "")
+		{
+		$legdoc=~m|<vote-question>([^<]*?)<|;
+		$votedesc=$1;
+		}
+	$legdoc=~m|<vote-result>([^<]*?)<|;
+	$voteresult=$1;
+
+# 	
+	if ($legdoc=~m|<total-stub>Totals</total-stub>\s*<yea-total>(\d+)</yea-total>\s*<nay-total>(\d+)</nay-total>\s*<present-total>(\d+)</present-total>\s*<not-voting-total>(\d+)</not-voting-total>|)
+		{
+		$y=$1;
+		$n=$2;
+		$p=$3;
+		$nv=$4;
+		}
+	
+	if ($y>0 || $n>0)
+		{
+		$votedesc=$legisnum." ".$voteresult." ".$y."-".$n." : ".$votedesc;
+		}
+	elsif ($p> 0 || $nv>0)
+		{
+		$votedesc=$legisnum." ".$voteresult." ".$p." Present ".$nv." Not Voting : ".$votedesc;
+		}
+	else
+		{
+		$votedesc=$legisnum." ".$voteresult." : ".$votedesc;
+		}
+	$posted_information=uc($posted_information);			
+	RedirectToWebsite($website,$logfile,$posted_information,$votedesc);
+	}
+	
+########################################	
+# Senate Vote
+########################################
+elsif ($posted_information=~m|senate-vote-(\d+)-(\d+)|i)
+	{
+	$year=$1;
+	$rollnum=$2;
+	$congress=int(($year-1787)/2);
+	$session=($year %2);  if ($session==0) {$session=2;}
+
+	$website=sprintf("http://www.senate.gov/legislative/LIS/roll_call_lists/roll_call_vote_cfm.cfm?congress=%d&session=%1d&vote=%05d",$congress,$session,$rollnum);
+
+
+	$xmlfile=sprintf("http://www.senate.gov/legislative/LIS/roll_call_votes/vote%d%d/vote_%d_%d_%05d.xml",$congress,$session,$congress,$session,$rollnum);
+	$legdoc=GetFileFromURL($xmlfile);
+	
+	if ($legdoc=~m|vote_title>([^<]*?)</vote|)
+		{		
+		$votetitle=$1;
+		}
+	
+	
+	if ($legdoc=~m|vote_question_text>([^<]*?)</vote|)
+		{		
+		$votedesc=$1;
+		}
+	
+	if ($legdoc=~m|<vote_result_text>([^<]*?)</vote_result_text>|)
+		{
+		$voteresult=$1;
+		if ($votetitle=~m|^Motion to Table|)
+			{
+			$voteresult=~s|^Motion to Table||;
+			}
+		$voteresult=~s|^Amendement Rejected|Rejected|;
+		}
+		
+	
+	$y=0; $n=0;
+	$votedesc=$votetitle." ".$voteresult." : ".$votedesc;
+	$posted_information=uc($posted_information);	
+	RedirectToWebsite($website,$logfile,$posted_information,$votedesc);
+	}
+	
+########################################	
+# US Code Paragraphs
+########################################
+elsif ($posted_information=~m|^usc-(\d+)-(\d+[^\d\(]*-?\d*[^\d\(]*)(\([^)]*?\))(\([^)]*?\))|i)
+	{
+	$usctitle=$1;
+	$section=$2;
+	$subsection=$3;
+	$paragraph=$4;
+	
+	#print $subsection;
+	# exit;
+	undef %USCChap;
+	GetUSCChaptersforTitleFromLRC($usctitle);
+	$http->reset();
+	$legdoc=GetUSCTxtDocFromLRC($usctitle,$section);
+	# Add the anchor
+	if ($legdoc=~m|\n-CITE-\s*\n(\s*$usctitle USC Sec\. $section)(.*)|)
+		{
+		
+		if ($legdoc=~m|-HEAD-[\x0d\x0a]\s*Sec\. ($section)\. (.*)|)
+			{
+			$t=$1;
+			$uscsecdesc=$2;
+			$uscsecdesc=~s|[\x0d\x0a]||g;
+			}
+		if ($legdoc=~m|\CHAPTER (\d+) - (.*)|)
+			{
+			$t=$1;
+			$uscchapdesc=$2;
+			$uscchapdesc=~s|[\x0d\x0a]||g;
+			$uscchapdesc=~s|\s+| |g;
+			$uscchapdesc=~s|\d+/\d+/\d+||;
+			}
+		if ($legdoc=~m|\n\s*TITLE ($usctitle) - (.*)|)
+			{
+			$t=$1;
+			$usctitledesc=$2;
+			$usctitledesc=~s|[\x0d\x0a]||g;
+			}
+		$str=$usctitledesc." - ".$uscchapdesc." : Section ".$section.". ".$uscsecdesc;
+		# $str=$usctitledesc;
+		# $str=$legdoc;
+		# 2013/06/07  - Removed for subsection link.
+		#  $legdoc=~s|\n-CITE-\s*\n(\s*$usctitle USC Sec\. $section)(.*)|<a name="USC-$usctitle-$section">\n-CITE-\n\1 \2|;
+
+
+		$posted_information=~s|^usc|USC|;
+		LogHit($logfile,$posted_information,$str);
+		}
+		# Added 2013/06/07
+		my $legdoc1=$legdoc;
+		my $legdoc2="";
+		my $escsubsection=$subsection;				
+		$escsubsection=~s|\(|\\\(|;
+		$escsubsection=~s|\)|\\\)|;
+		my $escparagraph=$paragraph;
+		$escparagraph=~s|\(|\\\(|;
+		$escparagraph=~s|\)|\\\)|;
+		
+		while ($legdoc1=~s|^([^\n]*?\n)||)
+			{
+			my $line=$1;
+			if ($line=~m|-CITE-|)
+				{
+				$legdoc2.=$line;				
+				$legdoc1=~s|^([^\n]*?\n)||;				
+				$line=$1;
+				$found=0;
+				if ($line=~m|(\s*$usctitle USC Sec\. $section\s)|)
+					{
+					$found=1;
+					}						
+				}
+			if ($found==2)
+				{
+				if ($line=~m|^\s*$escparagraph|)
+					{
+					$line="<a name=\"USC-$usctitle-$section$subsection$paragraph\">".$line;
+					$found=0;
+					}
+				}				
+				
+			if ($found==1)
+				{
+				if ($line=~m|^\s*$escsubsection|)
+					{
+					# $line="<a name=\"USC-$usctitle-$section$subsection\">\n".$line;
+					$found=2;
+					}
+				}				
+				
+			$legdoc2.=$line;				
+			}
+		$legdoc=$legdoc2;
+
+
+	# Store the file and Display the Stored File with the Anchor.	
+	$outfn="USC/".$usctitle."-".$chapter.".html";
+	$anchor="USC-".$usctitle."-".$section.$subsection.$paragraph;
+	StoreFileandDisplayToAnchor($legdoc,$outfn,$anchor,"<pre>");
+	exit;
+	}	
+
+
+########################################	
+# US Code Subsections
+########################################
+elsif ($posted_information=~m|^usc-(\d+)-(\d+[^\d\(]*-?\d*[^\d\(]*)(\([^)]*?\))|i)
+	{
+	$usctitle=$1;
+	$section=$2;
+	$subsection=$3;
+	
+	#print $subsection;
+	# exit;
+	undef %USCChap;
+	GetUSCChaptersforTitleFromLRC($usctitle);
+	$http->reset();
+	$legdoc=GetUSCTxtDocFromLRC($usctitle,$section);
+	# Add the anchor
+	if ($legdoc=~m|\n-CITE-\s*\n(\s*$usctitle USC Sec\. $section)(.*)|)
+		{
+		
+		if ($legdoc=~m|-HEAD-[\x0d\x0a]\s*Sec\. ($section)\. (.*)|)
+			{
+			$t=$1;
+			$uscsecdesc=$2;
+			$uscsecdesc=~s|[\x0d\x0a]||g;
+			}
+		if ($legdoc=~m|\CHAPTER (\d+) - (.*)|)
+			{
+			$t=$1;
+			$uscchapdesc=$2;
+			$uscchapdesc=~s|[\x0d\x0a]||g;
+			$uscchapdesc=~s|\s+| |g;
+			$uscchapdesc=~s|\d+/\d+/\d+||;
+			}
+		if ($legdoc=~m|\n\s*TITLE ($usctitle) - (.*)|)
+			{
+			$t=$1;
+			$usctitledesc=$2;
+			$usctitledesc=~s|[\x0d\x0a]||g;
+			}
+		$str=$usctitledesc." - ".$uscchapdesc." : Section ".$section.". ".$uscsecdesc;
+		# $str=$usctitledesc;
+		# $str=$legdoc;
+		# 2013/06/07  - Removed for subsection link.
+		#  $legdoc=~s|\n-CITE-\s*\n(\s*$usctitle USC Sec\. $section)(.*)|<a name="USC-$usctitle-$section">\n-CITE-\n\1 \2|;
+
+
+		$posted_information=~s|^usc|USC|;
+		LogHit($logfile,$posted_information,$str);
+		}
+		# Added 2013/06/07
+		my $legdoc1=$legdoc;
+		my $legdoc2="";
+		my $escsubsection=$subsection;		
+		$escsubsection=~s|\(|\\\(|;
+		$escsubsection=~s|\)|\\\)|;
+		while ($legdoc1=~s|^([^\n]*?\n)||)
+			{
+			my $line=$1;
+			if ($line=~m|-CITE-|)
+				{
+				$legdoc2.=$line;				
+				$legdoc1=~s|^([^\n]*?\n)||;				
+				$line=$1;
+				$found=0;
+				if ($line=~m|(\s*$usctitle USC Sec\. $section)|)
+					{
+					$found=1;
+					}						
+				}
+			if ($found==1)
+				{
+
+				if ($line=~m|^\s*$escsubsection|)
+					{
+					$line="<a name=\"USC-$usctitle-$section$subsection\">\n".$line;
+					$found=0;
+					}
+				}				
+			$legdoc2.=$line;				
+			}
+		$legdoc=$legdoc2;
+
+
+	# Store the file and Display the Stored File with the Anchor.	
+	$outfn="USC/".$usctitle."-".$chapter.".html";
+	$anchor="USC-".$usctitle."-".$section.$subsection;
+	StoreFileandDisplayToAnchor($legdoc,$outfn,$anchor,"<pre>");
+	exit;
+	}
+
+
+	
+########################################	
+# US Code Sections
+########################################
+elsif ($posted_information=~m|^usc-(\d+)-(\d+\D*-?\d*\D*)|i)
+	{
+	$usctitle=$1;
+	$section=$2;
+	undef %USCChap;
+	GetUSCChaptersforTitleFromLRC($usctitle);
+	$http->reset();
+	$legdoc=GetUSCTxtDocFromLRC($usctitle,$section);
+	# Add the anchor
+	if ($legdoc=~m|\n-CITE-\s*\n(\s*$usctitle USC Sec\. $section)(.*)|)
+		{
+		
+		if ($legdoc=~m|-HEAD-[\x0d\x0a]\s*Sec\. ($section)\. (.*)|)
+			{
+			$t=$1;
+			$uscsecdesc=$2;
+			$uscsecdesc=~s|[\x0d\x0a]||g;
+			}
+		if ($legdoc=~m|\CHAPTER (\d+) - (.*)|)
+			{
+			$t=$1;
+			$uscchapdesc=$2;
+			$uscchapdesc=~s|[\x0d\x0a]||g;
+			$uscchapdesc=~s|\s+| |g;
+			$uscchapdesc=~s|\d+/\d+/\d+||;
+			}
+		if ($legdoc=~m|\n\s*TITLE ($usctitle) - (.*)|)
+			{
+			$t=$1;
+			$usctitledesc=$2;
+			$usctitledesc=~s|[\x0d\x0a]||g;
+			}
+		$str=$usctitledesc." - ".$uscchapdesc." : Section ".$section.". ".$uscsecdesc;
+		# $str=$usctitledesc;
+		# $str=$legdoc;
+		$legdoc=~s|\n-CITE-\s*\n(\s*$usctitle USC Sec\. $section)(.*)|<a name="USC-$usctitle-$section">\n-CITE-\n\1 \2|;
+
+		$posted_information=~s|^usc|USC|;
+		LogHit($logfile,$posted_information,$str);
+		}
+
+
+	# Store the file and Display the Stored File with the Anchor.	
+	$outfn="USC/".$usctitle."-".$chapter.".html";
+	$anchor="USC-".$usctitle."-".$section;
+	StoreFileandDisplayToAnchor($legdoc,$outfn,$anchor,"<pre>");
+	exit;
+	}
+########################################	
+# US Code Titles
+########################################
+elsif ($posted_information=~m|usc(-\d+)?|i)
+	{
+	$usctitle=$1;
+	$usctitle=~s|-||;
+	$posted_information=uc($posted_information);	
+	
+	if ($usctitle eq "")
+		{
+		RedirectToWebsite("http://uscode.house.gov/download/ascii.shtml",$logfile,$posted_information,$nodescript);
+		}
+	elsif ($usctitle>=1 && $usctitle<51)
+		{
+		$website=sprintf("http://uscode.house.gov/download/title_%02d.shtml",$usctitle);
+		RedirectToWebsite($website,$logfile,$posted_information,$nodescript);		
+		}
+	else
+		{
+		print "<html><body><h1>LegisLink</h1>";
+	print "<p><b>Error:</b> US Code Titles range from 1 to 50</p>";
+		print "<p><b>US Code Sections</b><br/>\n";
+		print " &nbsp; <b>Format: </b>USC-[US_Code_title-number]-[US_Code_section-number]<br/>\n";
+		print " &nbsp; <b>Example:</b> <a href=\"http://legislink.org/us/USC-3-302\">http://legislink.org/us/USC-3-302</a><br/>";		
+		print " &nbsp; <b>Source:</b> <a href=\"http://uscode.house.gov/download/ascii.shtml\">Law Revision Counsel ASCII Version</a><br/>";
+		print " &nbsp; <b>Availability:</b> Most currently published version<br/>\n";
+		print "<p><a href=\"http://legislink.org/us\">Return to US Federal LegisLinks</a></p>";		
+		print "</body></html>"; 
+		exit;
+		}
+	exit;		
+	}	
+	
+	
+	
+	
+########################################	
+# Display the list of LegisLink formats	
+########################################
+else
+	{
+
+print <<EOD;
+
+<html>
+<head>
+<style type="text/css">
+body{font-size:15px;font-family:Helvetica}#guser nobr{font-size:13px}
+table td{font-size:15px;vertical-align:top}
+.title {background-color:darkblue; color:white; font-size:16px;}
+.legend {background-color:darkred; color:white; font-size:16px;}
+.tagline {font-familty:Helvetica;  font-size:12px;}
+</style>
+</head>
+<body>
+<center>
+
+
+<p></p>
+
+<table border="0">
+<tr valign="top"><td width="260px">
+<img width="260px" src="http://images2.wikia.nocookie.net/metroid/images/thumb/a/a4/Flag_of_the_United_States.svg/120px-Flag_of_the_United_States.svg.png" title="Flag of the United States.svg"></td>
+<td width="20px"></td>
+<td rowspan="2">
+<h2><font size="+2">United States Congress (<u>us</u>)</font></h2>
+
+<font size="+3"><b>http://legislink.org/<u>us</u>? . . . </b></font>
+<h3>Simplified Human-Readable URLs for Legislative Citations</h3>
+
+<font size="2"><a href="http://legislink.org"><b>HOME</b></a> &bull; 
+<a href="http://legislink.org/browse?us"><b>BROWSE ACTIVE</b></a> &bull; 
+<a href="http://legislink.org/privacy.html"><b>PRIVACY NOTICE</b></a> &bull;
+<a href="http://legislink.wikispaces.org"><b>CONTACT</b></a></font>
+
+</td>
+<td align="right" width="100px">
+<a href="http://legislink.org" alt="Link to Legislink.org home page"><img src="/ll6.jpg" alt="Legislink logo"/></a>
+</td>
+
+</tr></table>
+
+<table border="1" width="90%">
+<tr>
+<td class="title" align="center"><b>Pre-enactment</b></td>
+<td class="title" align="center"><b>Enacted Legislation</b></td>
+</tr>
+
+<td>
+ <form name="input" action="http://legislink.org/us" method="get">
+<b>Sections of Legislation (current Congress)</b>
+<br/> &nbsp; <b>Format: </b><b>[</b>bill-type<b>]</b>-<b>[</b>bill-number<b>]</b>-<b>[</b>bill-stage<b>]</b>-<b>[</b><i>section</i><b>]</b><br/>
+ &nbsp; <b>Example:</b> <a href="http://legislink.org/us/HR-11-IH-805">http://legislink.org/us/HR-11-IH-805</a>
+ <br/>
+ &nbsp;  <b>Edit the citation: <br/>
+ &nbsp;  &nbsp;  &nbsp; </b><font size="3">http://legislink.org/us/</font><input type="text" name="x" value="HR-11-IH-805" maxlength="20"/> <input type="submit" value="Go" />
+ <br/> &nbsp; <b>Source:</b> <a href="http://www.gpoaccess.gov/bills/index.html">US Government Priting Office Congressional Bills</a>
+ <br/> &nbsp; <b>Availability:</b> Current Congress Only 
+ <br/> &nbsp; <b>Warning:</b> URL will link to other documents in subsequent Congresses.
+</form>
+<form name="input" action="http://legislink.org/us" method="get">
+  <hr/>
+<b>Sections of Legislation (any Congress)</b><br/>
+ &nbsp; <b>Format: </b><b>[</b>congress-number<b>]</b>-<b>[</b>bill-type<b>]</b>-<b>[</b>bill-number<b>]</b>-<b>[</b>bill-stage<b>]</b>-<b>[</b><i>section</i><b>]</b><br/>
+ &nbsp; <b>Example:</b> <a href="http://legislink.org/us/111-HR-1-IH-1221">http://legislink.org/us/111-HR-1-IH-1221</a>
+ <br/>
+ &nbsp;  <b>Edit the citation: <br/>
+  &nbsp;  &nbsp;  &nbsp; </b><font size="3">http://legislink.org/us/</font><input type="text" name="x" value="111-HR-1-IH-1221" maxlength="24"/> <input type="submit" value="Go" />
+  <br/> &nbsp; <b>Source:</b> <a href="http://www.gpoaccess.gov/bills/index.html">US Government Priting Office Congressional Bills</a>
+ <br/> &nbsp; <b>Availability:</b> 1995 - present (104th - 111th Congress) and partial 103rd
+</form>
+
+ <form name="input" action="http://legislink.org/us" method="get">
+  <hr/>
+ <b>Roll Call Votes</b><br/>
+ &nbsp; <b>Format: </b><b>[</b>chamber<b>]</b>-vote-<b>[</b>year<b>]</b>-[roll-call-number]<br/>
+ &nbsp; <b>Example:</b> <a href="http://legislink.org/us/house-vote-2009-1">http://legislink.org/us/house-vote-2009-1</a>
+ <br/>
+ &nbsp;  <b>Edit the citation: <br/>
+ &nbsp;  &nbsp;  &nbsp; </b><font size="3">http://legislink.org/us/</font><input type="text" name="x" value="house-vote-2009-1" maxlength="22"/> <input type="submit" value="Go" />
+
+ <br/> &nbsp; <b>Sources:</b> <a href="http://clerk.house.gov/legislative/legvotes.html">Clerk of the US House Roll Call votes</a> and 
+ <br/> &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; <a href="http://www.senate.gov/pagelayout/legislative/a_three_sections_with_teasers/votes.htm">US Senate Roll Call votes</a> 
+ <br/> &nbsp; <b>Availability:</b> House: 1990 - present &nbsp; Senate: 1989 - present<br/>
+</form> 
+</td>
+
+<td>
+
+<form name="input" action="http://legislink.org/us" method="get">
+<b>Statutes at Large Citations</b><br/>
+ &nbsp; <b>Format: </b>stat-[volume]-[page-number]-{PDF}<br/>
+
+ &nbsp; <b>Example:</b> <a href="http://legislink.org/us/stat-78-241">http://legislink.org/us/stat-78-241</a><br/>
+  &nbsp;  <b>Edit the citation: <br/>
+ &nbsp;  &nbsp;  &nbsp; </b><font size="3">http://legislink.org/us/</font><input type="text" name="x" value="stat-78-241" maxlength="20"/> <input type="submit" value="Go" />
+  <br/> &nbsp; <b>Source:</b> <a href="http://www.gpo.gov/fdsys/browse/collection.action?collectionCode=STATUTE">US Government Printing Office Statutes at Large files</a><br/> &nbsp; <b>Availability:</b> Volumes 65 - 124 (1951 - 2010)
+</form>
+
+
+  <hr/>
+
+ <form name="input" action="http://legislink.org/us" method="get">
+<b>Public Law Sections</b><br/>
+ &nbsp; <b>Format: </b>PL-[congress-number]-[PL-number]-[section]<br/>
+
+ &nbsp; <b>Example:</b> <a href="http://legislink.org/us/PL-110-329-4">http://legislink.org/us/PL-110-329-4</a><br/>
+  &nbsp;  <b>Edit the citation: <br/>
+ &nbsp;  &nbsp;  &nbsp; </b><font size="3">http://legislink.org/us/</font><input type="text" name="x" value="PL-110-329-4" maxlength="20"/> <input type="submit" value="Go" />
+  <br/> &nbsp; <b>Source:</b> <a href="http://www.gpoaccess.gov/plaws/index.html">US Government Priting Office text versions of Public Laws</a><br/> &nbsp; <b>Availability:</b> 1995 - 2009 (104th through 111th Congress)
+
+</form>
+
+<form name="input" action="http://legislink.org/us" method="get">
+ <hr/>
+<b>Public Law Titles</b><br/>
+ &nbsp; <b>Format: </b>PL-[congress-number]-[PL-number]-title-[title-number]<br/>
+ &nbsp; <b>Example:</b> <a href="http://legislink.org/us/PL-111-3-title-ii">http://legislink.org/us/PL-111-3-title-ii</a><br/>
+ &nbsp;  <b>Edit the citation: <br/>
+ 
+ &nbsp;  &nbsp;  &nbsp; </b><font size="3">http://legislink.org/us/</font><input type="text" name="x" value="PL-111-3-title-ii" maxlength="30"/> <input type="submit" value="Go" />
+ 
+ <br/> &nbsp; <b>Source:</b> <a href="http://www.gpoaccess.gov/plaws/index.html">US Government Priting Office text versions of Public Laws</a><br/> &nbsp; <b>Availability:</b> 1995 - 2009 (104th through 111th Congress)<br/>
+ <hr/>
+
+ </form> 
+ 
+ 
+ 
+ 
+ 
+</td>
+</tr>
+
+<tr>
+<td class="title" align="center"><b>Consolidated Law</b></td>
+<td class="legend" align="center"><b>Legend</b></td>
+</tr>
+
+<tr>
+<td width="50%" valign="top">
+ <form name="input" action="http://legislink.org/us" method="get">
+
+<b>US Code Sections</b><br/>
+
+ &nbsp; <b>Format: </b>USC-[title]-[section]<br/>
+ &nbsp; <b>Example:</b> <a href="http://legislink.org/us/USC-3-302">http://legislink.org/us/USC-3-302</a>
+<br/>  &nbsp;  <b>Edit the citation: <br/>
+ 
+ &nbsp;  &nbsp;  &nbsp; </b><font size="3">http://legislink.org/us/</font><input type="text" name="x" value="USC-3-302" maxlength="20"/> <input type="submit" value="Go" />
+
+ <br/> &nbsp; <b>Source:</b> <a href="http://uscode.house.gov/download/ascii.shtml">Law Revision Counsel ASCII Version</a><br/> &nbsp; <b>Availability:</b> Most currently published version<br/>
+ </form> 
+</td>
+
+<td>
+<! Extras go here -->
+<b>bill-type: </b>HR, HRES, HJRES, HCONRES, S, SRES, SJRES, or SCONRES<br/>
+<b>bill-stage: </b>IH, IS, ATH, ATS, CPH, CPS, EAH, EAS, PCH, PCS, RFH, RFS, RH, RS, EH, ES, ENR<br/>
+<b>chamber: </b> house or senate<br/>
+<b>congress-number: </b> Two-year term beginning in odd year. 2009 started 111th Congress<br/>
+
+</td>
+</tr>
+
+<tr>
+<td colspan="2">
+This website redirects your browser to official government or government designated websites or retrieves that data at the time URLs are submitted.
+<br/><br/>Documents may be stored temporarily at LegisLink.org to provide sub-document access when that access is not provided by the official repository.
+<br/>Always check the domain in the URL at the top of your browser to know the origin of the page being viewed.
+</td>
+</tr>
+
+</table>
+<br/>
+<span class="tagline"><a rel="license" href="http://creativecommons.org/licenses/publicdomain/"><img alt="Creative Commons License" style="border-width:0" src="http://i.creativecommons.org/l/publicdomain/88x31.png" /></a>
+This work is in the <a rel="license" href="http://creativecommons.org/licenses/publicdomain/">Public Domain</a><br/>
+<a href="http://legislink.org/code.html">SOURCE CODE </a> - <a href="http://legislink.wikispaces.org">WIKISPACE</a> - <a href="privacy.html">PRIVACY NOTICE (October 8, 2009)</a></span>
+
+
+
+
+
+</center>
+</body>
+</html>
+EOD
+
+	exit;
+	}
+	
+
+
+	
+#######################################
+# GetFileFromURL
+#######################################
+sub GetFileFromURL {
+my $website=$_[0];
+my $errorstr=$_[1];
+if (!($req = $http->request($website))) 
+	{
+	print "<html><title>".$website." not available</title>\n";
+	print "<body>\n";	
+	print "<h2>".$website." is unavailable at this time.</h2>\n";
+	print "<p>Here's a link to the government's URL you requested. <a href=\"".$website."\">".$website."</a>";
+	print "</body></html>";
+	exit;
+	}
+	
+my $body="";
+$body = $http->body();
+
+# Text for availability
+if ($errorstr && $body=~m|$errorstr|)
+	{
+	print "<html><title>".$website." not available</title>\n";
+	print "<body>\n";	
+	print "<h2>".$website." is unavailable at this time.</h2>\n";
+	print "<p>Here's a link to the government's URL you requested. <a href=\"".$website."\">".$website."</a>";
+	print "</body></html>";
+	exit;
+	}
+
+return($body);	
+
+}
+	
+	
+	
+	
+
+#######################################
+# GetPublicLawTxtDocFromGPO
+#######################################
+sub GetPublicLawTxtDocFromGPO	{
+my $congress=$_[0];
+my $plnum=$_[1];
+my $redirect=$_[2];
+
+
+$website=sprintf("http://www.gpo.gov/fdsys/pkg/PLAW-%dpubl%d/html/PLAW-%dpubl%d.htm",$congress,$plnum,$congress,$plnum);
+goto GetPL;
+
+# Zero padding of PL numbers under 100.
+if ($plnum<100)
+	{
+
+
+	$website=sprintf("http://frwebgate.access.gpo.gov/cgi-bin/getdoc.cgi?dbname=%d_cong_public_laws&docid=f:publ%03d.%d",$congress,$plnum,$congress);
+	}
+else	
+	{
+	$website=sprintf("http://frwebgate.access.gpo.gov/cgi-bin/getdoc.cgi?dbname=%3d_cong_public_laws&docid=f:publ%d.%d",$congress,$plnum,$congress);
+	}
+
+GetPL:
+# If the file at GPO can't be found
+if (!($req = $http->request($website))) 
+	{
+	print "<html><title>Public Law ".$congress."-".$plnum."</title>\n";
+	print "<body>\n";	
+	print "<h2>Public Law ".$congress."-".$plnum." is unavailable at GPO at this time.</h2>\n";
+	print "<p>Here's a link to the Public Law you requested at GPO. <a href=\"".$website."\">".$website."</a>";
+	print "</body></html>";
+	exit;
+	}
+my $body="";
+$body = $http->body();
+
+# Text for availability
+if ($body=~m|this database is not available at this time|)
+	{
+	print "<html><body>";
+	print "GPO is having a problem<br/>";
+	print "<p>Here's a link to the Public Law you requested at GPO.<br/>";
+	print "<a href=\"".$website."\">".$website."</a>";
+	print "</body></html>";
+	exit;
+	}
+	
+if ($body=~m|No such document \[publ|)
+	{
+	print "<html><body>\n";
+	print "Public Law ".$congress."-".$plnum." does not exist.<br/>";
+	print "<p>Here's a link to the Public Law you requested at GPO to double check the error.";
+	print "<br/><a href=\"".$website."\">".$website."</a>";
+	print "</body></html>";
+	exit;
+	}
+
+if ($redirect==1)
+	{
+	RedirectToWebsite($website);
+	exit;
+	}
+
+	
+return($body);
+}	
+
+
+#######################################
+# GetUSCTxtDocFromLRC
+#######################################
+sub GetUSCTxtDocFromLRC {
+my $title=$_[0];
+my $section=$_[1];
+
+for $key ( sort {$a<=>$b} keys %USCChap )
+	{
+	# print "($key)->($USCChap{$key})\n";
+	if ($section>=$USCChap{$key})
+		{
+		$lastchap=$key;
+		}
+	}
+
+# 2013/06/07 - for titles with parts.
+if ($title==5)
+	{
+	$lastchap=int($section/100);
+	}
+
+$website=sprintf("http://uscode.house.gov/download/pls/%02dC%d.txt",$title,$lastchap);
+$websitecatalog=sprintf("http://uscode.house.gov/download/title_%02d.shtml",$title);
+
+# If the file at LRC can't be found
+if (!($req = $http->request($website))) 
+	{
+	print "<html><title>USC ".$title."</title>\n";
+	print "<body>\n";	
+	print "<h2>US Code Title ".$title." is unavailable from <a href=\"http://uscode.house.gov\">uscode.house.gov</a> at this time.</h2>\n";
+	print "<p>US Code Title ".$title." files are at <a href=\"".$websitecatalog."\">".$websitecatalog."</a>";
+	print "</body></html>";
+	exit;
+	}
+my $body="";
+$body = $http->body();
+
+
+	
+if ($body=~m|<h1>The page cannot be found</h1>|)
+	{
+	print "<html><body>\n";
+	print "<body>\n";	
+	print "<h2>US Code Title ".$title." is unavailable from <a href=\"http://uscode.house.gov\">uscode.house.gov</a>.</h2>\n";
+	print "<p>-US Code Title ".$title." files are at <a href=\"".$websitecatalog."\">".$websitecatalog."</a>";
+	print "</body></html>";
+	exit;
+	}
+
+return($body);
+}
+
+
+
+#######################################
+# GetUSCChaptersforTitleFromLRC
+#######################################
+sub GetUSCChaptersforTitleFromLRC {
+my $title=$_[0];
+
+# Zero padding of USC Title numbers
+
+$website=sprintf("http://uscode.house.gov/download/pls/%02dT.txt",$title);
+$websitecatalog=sprintf("http://uscode.house.gov/download/title_%02d.shtml",$title);
+
+# If the file at LRC can't be found
+if (!($req = $http->request($website))) 
+	{
+	print "<html><title>USC ".$title."</title>\n";
+	print "<body>\n";	
+	print "<h2>US Code Title ".$title." is unavailable from <a href=\"http://uscode.house.gov\">uscode.house.gov</a> at this time.</h2>\n";
+	print "<p>US Code Title ".$title." files are at <a href=\"".$websitecatalog."\">".$websitecatalog."</a>";
+	print "</body></html>";
+	exit;
+	}
+my $body="";
+$body = $http->body();
+
+	
+if ($body=~m|<h1>The page cannot be found</h1>|)
+	{
+	print "<html><body>\n";
+	print "<body>\n";	
+	print "<h2>US Code Title ".$title." is unavailable from <a href=\"http://uscode.house.gov\">uscode.house.gov</a>.</h2>\n";
+	print "<p>US Code Title ".$title." files are at <a href=\"".$websitecatalog."\">".$websitecatalog."</a>";
+	print "</body></html>";
+	exit;
+	}
+	
+my @lines=split(/\n/,$body);
+my $j=0;
+my $tocfound=0;
+while ($lines[$j]<$#lines)
+	{
+	if ($lines[$j]=~m|^\s*Chap\.\s*Sec\.\s*$|)
+		{
+		$tocfound=1;
+		}
+	if ($tocfound==1 && $lines[$j]=~m|^\s*$|)
+		{
+		return;
+		}
+	elsif ($tocfound==1)
+		{
+		if ($lines[$j]=~m|^\s*(\d+)\.|)
+			{
+			$chap=$1;
+			}
+		if ($lines[$j]=~m|(\d+)\s*$|)
+			{
+			$sec=$1;
+			$USCChap{$chap}=$sec;
+			}
+		}
+	$j++;
+	}
+
+
+}	
+
+#######################################
+# GetDescriptionFromDoc
+#######################################
+
+sub GetDescriptionFromDoc {
+my $doc=$_[0];
+
+my $descript="";
+if ($doc=~m|This\s+Act\s+may\s+be\s+cited\s+as\s+the\s+``([^\.]*?)\.|)
+	{
+	$descript=$1;
+	$descript=~s|''\.?\s*$||;
+	$descript=~s|\n| |g;
+	$descript=~s|\s+| |g;
+	$descript=~s|\s*$||;
+	}
+return($descript);
+}
+
+#######################################
+# AnchorLastRegex 
+#######################################
+sub AnchorLastRegex {
+
+my $str=$_[0];
+my $search=$_[1];
+my $anchor=$_[2];
+
+while ($str=~m|$search|gi)
+	{
+	$pos=pos($str);
+	}
+my $str1=substr($str,0,$pos-length($search));
+$str2=substr($str,$pos-length($search)+1,);
+my $aout="<a name=\"".$anchor."\">";
+
+$str2=~s|($search)|\n$aout\1</a>|i;
+
+return ($str1.$str2);
+
+}
+
+
+sub UsePDF {
+my $pdfurl=$_[0];
+my $section=$_[1];
+
+# print "Content-type: text/html\n\n";
+# print "<html><body>";
+# exit;
+
+
+if (GetandStoreFileFromURL($pdfurl,"x.pdf")==1)
+	{	
+	$filesize= -s "x.pdf";
+	# print "SUCCESS";
+	# print " ".$v." ".$filesize."</body></html>";
+
+	if ($filesize < 200)	
+		{goto ShowError;}
+
+# 	exit;
+	
+
+	my $pdf = CAM::PDF->new("x.pdf");
+	$pagecount=$pdf->numPages();
+	for (my $j=1; $j<$pagecount; $j++)
+		{
+		my $pagetext = $pdf->getPageText($j);
+		if ($pagetext=~m!(SECTION|SEC\.) $section\. !)
+			{
+			# print $pdfurl."<br/>page=".$j."</body></html>\n";
+			# exit;
+			
+			RedirectToWebsite($pdfurl."#page=".$j);
+			}
+		}
+		
+	RedirectToWebsite($pdfurl);	
+
+	}
+
+
+ShowError:
+	
+# print "Content-type: text/html\n\n";
+
+print "<body><html><p>Your LegisLink request resolved to <a href=\"".$pdfurl."\">".$pdfurl."</a>. The file either doesn't exist or is unavailable at this time.<p>";
+	
+print "</body></html>";
+	
+exit;
+		
+}
+
+
+
+######################################## 
+sub GetStatLink {
+########################################
+# This function reads the Statutes at Large volume TOC
+# to determine which file contains the specific citation.
+# For the HTML files available for 2003-2010, <a name>s have 
+# been added in order to provide links directly to the 
+# page of the statute.  Requesting pages within the file is common.
+# Created: 12/14/2013
+# Updated 2/28/2014
+
+my $vol=shift;
+my $p=shift;
+my $ftype=shift;
+
+
+
+$p=$p*1;
+
+if ($vol<65)
+	{goto Pre1951;}
+
+
+my $lastpage=10000;
+
+my $lastpageplus="";
+
+# print $statfile."\n";
+
+# XML file used for volumes 65 through 124.
+my $statfile=$StatDirectory."/".$vol.".xml";
+if (-e $statfile)
+	{
+open(STATTOC,$statfile);
+while (<STATTOC>)
+	{
+	# <div stat-page="3016" public-law-num="110-314" available-formats="Text,PDF,More">
+	$textfound=0;
+	# print $_;
+	if (m|stat-page="(\d+)(\-\d+)?|)
+		{
+		$page=$1*1;
+		$pageplus=$2;
+# print "PAGE=".$page." ".$pageplus."\n";
+		# print "page=".$page."\n";
+		if (m|available-formats="([^"]*?)"|)
+			{
+			$f=$1;
+			if ($f=~m|Text|)
+				{$textfound=1;}
+			}
+		if ($page > $p)
+			{
+# print "PAGE > p ".$page." ".$p." lp=".$lastpage." lpp=".$lastpageplus."\n";
+			$pageoffset=$p-$lastpage+1;
+			close(STATTOC);			
+			if ($ftype eq "PDF")
+				{
+				close(STATTOC);
+				if ($pageoffset==1)
+					{
+					return("http://www.gpo.gov/fdsys/pkg/STATUTE-".$vol."/pdf/STATUTE-".$vol."-Pg".$lastpage.$lastpageplus.".pdf");
+					}
+				else
+					{
+					return("http://www.gpo.gov/fdsys/pkg/STATUTE-".$vol."/pdf/STATUTE-".$vol."-Pg".$lastpage.$lastpageplus.".pdf#page=".$pageoffset);
+					}
+				}
+			elsif ($textfound)
+				{
+				$statfile=$StatDirectory."/".$vol."/p".$lastpage.$lastpageplus.".html";
+				if ($pageoffset>0)
+					{
+					$statfile.="#".$vol.":".$p;
+					}
+				# $pageoffset." http://www.gpo.gov/fdsys/pkg/STATUTE-".$vol."/html/STATUTE-".$vol."-Pg".$lastpage.".html");
+		# http://www.legisworks.com/home2/congres4/public_html/legisworks/Stat/117/p2490.html#117:2563	
+				$statfile=~s|$StatDirectory|http://www.legislink.org/Stat|;
+				$statfile=~s|^/home2/congres4/public_html/legislink/|http://www.legislink.org/|;
+				close(STATTOC);									
+				return($statfile);
+				}
+			else
+				{
+				close(STATTOC);					
+				if ($pageoffset==1)
+					{
+					return("http://www.gpo.gov/fdsys/pkg/STATUTE-".$vol."/pdf/STATUTE-".$vol."-Pg".$lastpage.$lastpageplus.".pdf");
+					}
+				else
+					{
+					return("http://www.gpo.gov/fdsys/pkg/STATUTE-".$vol."/pdf/STATUTE-".$vol."-Pg".$lastpage.$lastpageplus.".pdf#page=".$pageoffset);
+					}
+				}
+			
+			}			
+
+		if (0) # $page == $p)
+			{
+
+			close(STATTOC);	
+			if ($ftype eq "PDF")
+				{
+				return("http://www.gpo.gov/fdsys/pkg/STATUTE-".$vol."/pdf/STATUTE-".$vol."-Pg".$p.".pdf");
+				}
+			elsif ($textfound)
+				{
+				return("http://www.gpo.gov/fdsys/pkg/STATUTE-".$vol."/html/STATUTE-".$vol."-Pg".$p.".htm");
+				}
+			else
+				{
+				return("http://www.gpo.gov/fdsys/pkg/STATUTE-".$vol."/pdf/STATUTE-".$vol."-Pg".$p.".pdf");
+				}
+
+			}
+		$lastpage=$page;
+		$lastpageplus=$pageplus;			
+		}
+	}
+close(STATTOC);	
+}
+
+Pre1951:
+my $lastpage=10000;
+$statfile=$StatDirectory."/xout".$vol.".txt";
+if (-e $statfile)
+	{
+	open(STATTOC,$statfile);
+	while (<STATTOC>)
+		{
+		m|^([^\s]*?)\s+(\d+)|;
+		$law=$1;
+		$page=$2;
+		# <div stat-page="3016" public-law-num="110-314" available-formats="Text,PDF,More">
+		$textfound=0;
+		# print $_;
+		if ($page > $p)
+			{
+			$pageoffset=$p-$lastpage+1;
+			close(STATTOC);	
+			return("http://legisworks.org/sal/".$vol."/stats/STATUTE-".$vol."-Pg".$lastpage.".pdf#page=".$pageoffset);
+			}
+		$lastpage=$page;
+		}
+	}
+
+
+
+}
